@@ -18,11 +18,11 @@ class HomeViewModel @Inject constructor(
 ): AndroidViewModel(application) {
 
     fun startScan() {
-
+        deviceManager.startScan()
     }
 
     fun stopScan() {
-
+        deviceManager.stopScan()
     }
 
 }
