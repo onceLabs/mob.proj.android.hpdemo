@@ -13,19 +13,45 @@ import android.os.Build
 import android.util.Log
 import com.oncelabs.hpdemo.device.gatt.BGM220PGatt
 import com.oncelabs.hpdemo.device.gatt.CharacteristicUUIDs
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import java.util.Queue
 import java.util.UUID
+import java.util.concurrent.ConcurrentLinkedQueue
 
 val CHARACTERISTIC_UPDATE_NOTIFICATION_DESCRIPTOR_UUID =
     UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+
+enum class GattOperationType {
+    READ,
+    WRITE,
+    NOTIFY,
+    INDICATE,
+    ENABLE_NOTIFICATION,
+    ENABLE_INDICATION,
+    DISABLE_NOTIFICATION,
+    DISABLE_INDICATION,
+    SERVICE_DISCOVERY,
+    MTU_UPDATE
+}
+
+class GattOperation(
+    val type: GattOperationType,
+    val operation: () -> Boolean
+)
 
 @SuppressLint("MissingPermission")
 class BGM220P(
     scanResult: ScanResult,
     context: Context
 ) {
+    private var gattOperationScope = CoroutineScope(Dispatchers.IO)
     private val bgmGatt: BGM220PGatt = BGM220PGatt()
     private var bluetoothGatt: BluetoothGatt? = null
     private var servicesFound = false
+
+    private var gattOperationQueue: Queue<GattOperation> = ConcurrentLinkedQueue()
+    private var pendingGattOperation: GattOperation? = null
 
     @OptIn(ExperimentalStdlibApi::class)
     private val gattCallback = object : BluetoothGattCallback() {
@@ -35,7 +61,9 @@ class BGM220P(
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
                     bluetoothGatt = gatt
-                    bluetoothGatt?.discoverServices()
+                    enqueueOperation(GattOperation(GattOperationType.SERVICE_DISCOVERY) {
+                        return@GattOperation gatt.discoverServices()
+                    })
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                     gatt.close()
                 }
@@ -51,19 +79,13 @@ class BGM220P(
             } else {
                 Log.w(TAG, "onServicesDiscovered received: $status")
             }
-        }
-
-        override fun onCharacteristicChanged(
-            gatt: BluetoothGatt,
-            characteristic: BluetoothGattCharacteristic
-        ) {
-            with(characteristic) {
-                Log.i(
-                    "BluetoothGattCallback",
-                    "Characteristic ${characteristic.uuid} changed | value: ${value.toHexString()}"
-                )
+            // Check if pending operation is not null and operation type is SERVICE_DISCOVERY
+            if (pendingGattOperation != null && pendingGattOperation?.type == GattOperationType.SERVICE_DISCOVERY) {
+                Log.i("BluetoothGattCallback", "Service discovery status: $status")
+                signalEndOfOperation()
             }
         }
+
 
         override fun onCharacteristicChanged(
             gatt: BluetoothGatt,
@@ -75,6 +97,64 @@ class BGM220P(
                 "BluetoothGattCallback",
                 "Characteristic ${characteristic.uuid} changed | value: $newValueHex"
             )
+        }
+
+        override fun onCharacteristicWrite(
+            gatt: BluetoothGatt?,
+            characteristic: BluetoothGattCharacteristic?,
+            status: Int
+        ) {
+            super.onCharacteristicWrite(gatt, characteristic, status)
+            // Check if pending operation is not null and operation type is WRITE
+            if (pendingGattOperation != null && pendingGattOperation?.type == GattOperationType.WRITE) {
+                Log.i(
+                    "BluetoothGattCallback",
+                    "Characteristic ${characteristic?.uuid} write status: $status"
+                )
+                signalEndOfOperation()
+            }
+        }
+
+
+        override fun onCharacteristicRead(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray,
+            status: Int
+        ) {
+            super.onCharacteristicRead(gatt, characteristic, value, status)
+            // Check if pending operation is not null and operation type is READ
+            if (pendingGattOperation != null && pendingGattOperation?.type == GattOperationType.READ) {
+                Log.d(
+                    "BluetoothGattCallback",
+                    "Characteristic ${characteristic.uuid} read status: $status")
+                signalEndOfOperation()
+            }
+        }
+
+        override fun onDescriptorWrite(
+            gatt: BluetoothGatt?,
+            descriptor: BluetoothGattDescriptor?,
+            status: Int
+        ) {
+            super.onDescriptorWrite(gatt, descriptor, status)
+            Log.d("BluetoothGattCallback", "Descriptor ${descriptor?.uuid} write status: $status")
+            // Check if pending operation is not null and operation type is ENABLE_NOTIFICATION or ENABLE_INDICATION
+            if (pendingGattOperation != null && (pendingGattOperation?.type == GattOperationType.ENABLE_NOTIFICATION || pendingGattOperation?.type == GattOperationType.ENABLE_INDICATION)) {
+                Log.d(
+                    "BluetoothGattCallback",
+                    "Descriptor ${descriptor?.uuid} write status: $status")
+                signalEndOfOperation()
+            }
+        }
+
+        override fun onDescriptorRead(
+            gatt: BluetoothGatt,
+            descriptor: BluetoothGattDescriptor,
+            status: Int,
+            value: ByteArray
+        ) {
+            super.onDescriptorRead(gatt, descriptor, status, value)
         }
     }
 
@@ -88,12 +168,37 @@ class BGM220P(
                 if (bgmGatt.foundService(service)) {
                     service.characteristics.forEach {
                         if (bgmGatt.foundCharacteristic(it)) {
-                            enableNotifications(it)
+                            enqueueOperation(GattOperation(GattOperationType.ENABLE_NOTIFICATION) {
+                                enableNotifications(it)
+                                return@GattOperation true
+                            })
                         }
                     }
                 }
             }
         }
+        readThroughputInformation()
+    }
+
+    private fun readThroughputInformation() {
+        enqueueOperation(GattOperation(GattOperationType.READ) {
+            return@GattOperation bluetoothGatt?.readCharacteristic(bgmGatt.connectionIntervalCharacteristic) ?: false
+        })
+        enqueueOperation(GattOperation(GattOperationType.READ) {
+            return@GattOperation bluetoothGatt?.readCharacteristic(bgmGatt.responderLatencyCharacteristic) ?: false
+        })
+        enqueueOperation(GattOperation(GattOperationType.READ) {
+            return@GattOperation bluetoothGatt?.readCharacteristic(bgmGatt.supervisionTimeoutCharacteristic) ?: false
+        })
+        enqueueOperation(GattOperation(GattOperationType.READ) {
+            return@GattOperation bluetoothGatt?.readCharacteristic(bgmGatt.connectionPhyCharacteristic) ?: false
+        })
+        enqueueOperation(GattOperation(GattOperationType.READ) {
+            return@GattOperation bluetoothGatt?.readCharacteristic(bgmGatt.pduSizeCharacteristic) ?: false
+        })
+        enqueueOperation(GattOperation(GattOperationType.READ) {
+            return@GattOperation bluetoothGatt?.readCharacteristic(bgmGatt.mtuSizeCharacteristic) ?: false
+        })
     }
 
     private fun enableNotifications(characteristic: BluetoothGattCharacteristic) {
@@ -232,5 +337,69 @@ class BGM220P(
         }
     }
 
+    @Synchronized
+    private fun enqueueOperation(operation: GattOperation) {
+        gattOperationQueue.add(operation)
+        if (pendingGattOperation == null) {
+            doNextOperation()
+        }
+    }
+
+    @Synchronized
+    private fun signalEndOfOperation() {
+        print("OBPeripheral: request completed $pendingGattOperation")
+        pendingGattOperation = null
+        if (gattOperationQueue.isNotEmpty()) {
+            doNextOperation()
+        }
+    }
+
+    @Synchronized
+    private fun doNextOperation() {
+        Log.d(TAG, "BGM220GattQueue: doNextOperation")
+        if (pendingGattOperation != null) {
+            print("OBPeripheral: pending request, abort doNextOperation")
+            return
+        }
+
+        val gattRequest = gattOperationQueue.poll() ?: run {
+            print("OBPeripheral: GATT request queue empty ")
+            return
+        }
+        pendingGattOperation = gattRequest
+
+        when (gattRequest.type) {
+            GattOperationType.WRITE -> {
+                print("Write")
+            }
+            GattOperationType.READ -> {
+                print("Read")
+            }
+            GattOperationType.ENABLE_INDICATION -> {
+                print("Enable Indication")
+            }
+            GattOperationType.DISABLE_INDICATION -> {
+                print("Disable Indication")
+            }
+            GattOperationType.ENABLE_NOTIFICATION -> {
+                print("Enable Notification")
+            }
+            GattOperationType.DISABLE_NOTIFICATION -> {
+                print("Disable Notification")
+            }
+            GattOperationType.MTU_UPDATE -> {
+                print("MTU Update request")
+            }
+            else -> {}
+        }
+        if (gattRequest.operation.invoke()){
+            // TODO: Add call to log for analytics
+        } else {
+            // TODO: Add call to log for analytics
+            // Failed, move on to next so we don't clog the queue
+            // need to signal an error
+            signalEndOfOperation()
+        }
+    }
 
 }

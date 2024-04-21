@@ -19,6 +19,7 @@ import com.oncelabs.hpdemo.permission.PermissionType
 import com.oncelabs.hpdemo.permission.RequestAllPermissions
 import com.oncelabs.hpdemo.screen.HomeScreen
 import dagger.hilt.android.AndroidEntryPoint
+import java.lang.ref.WeakReference
 import javax.inject.Inject
 
 /**
@@ -35,6 +36,9 @@ class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalPermissionsApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Get context
+        val applicationContext = WeakReference(applicationContext)
+        deviceManager.init(applicationContext)
         setContent {
             RequestAllPermissions(startBluetooth = {
 

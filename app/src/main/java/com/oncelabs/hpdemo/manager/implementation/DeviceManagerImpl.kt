@@ -166,7 +166,7 @@ class DeviceManagerImpl @Inject constructor(
                                 val device = BGM220P(result, context)
                                 leDeviceMap[deviceAddress] = device
                             } else {
-                                Log.d("TEST", "DEVICE FOUND ${result.device.address}")
+                                //Log.d("TEST", "DEVICE FOUND ${result.device.address}")
                             }
                         } else {
 
