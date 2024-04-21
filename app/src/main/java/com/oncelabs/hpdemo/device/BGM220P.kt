@@ -15,6 +15,7 @@ import com.oncelabs.hpdemo.device.gatt.BGM220PGatt
 import com.oncelabs.hpdemo.device.gatt.CharacteristicUUIDs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import java.util.Date
 import java.util.Queue
 import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -52,6 +53,10 @@ class BGM220P(
 
     private var gattOperationQueue: Queue<GattOperation> = ConcurrentLinkedQueue()
     private var pendingGattOperation: GattOperation? = null
+    private var timeStampStart: Date? = null
+    private var timeStampEnd: Date? = null
+    private var bytesReceived: Int = 0
+    private var throughput: Double = 0.0
 
     @OptIn(ExperimentalStdlibApi::class)
     private val gattCallback = object : BluetoothGattCallback() {
@@ -92,11 +97,13 @@ class BGM220P(
             characteristic: BluetoothGattCharacteristic,
             value: ByteArray
         ) {
-            val newValueHex = value.toHexString()
-            Log.i(
-                "BluetoothGattCallback",
-                "Characteristic ${characteristic.uuid} changed | value: $newValueHex"
-            )
+//            val newValueHex = value.toHexString()
+//            Log.i(
+//                "BluetoothGattCallback",
+//                "Characteristic ${characteristic.uuid} changed | value: $newValueHex"
+//            )
+            // Attempt to decode
+            val cp = decode(value, characteristic.uuid)
         }
 
         override fun onCharacteristicWrite(
@@ -261,12 +268,11 @@ class BGM220P(
         class unknown() : ConnectionParameter()
     }
 
-
     interface SILThroughputConnectionParametersDecoderType {
         fun decode(data: ByteArray, characterisitc: UUID): ConnectionParameter
     }
 
-    class SILThroughputConnectionParametersDecoder {
+    //class SILThroughputConnectionParametersDecoder {
         private val CONNECTION_INTERVAL_STEP = 1.25
         private val SLAVE_LATENCY_STEP = 1.25
         private val SUPERVISION_TIMEOUT_STEP = 10
@@ -291,6 +297,24 @@ class BGM220P(
                 }
                 CharacteristicUUIDs.MTU_SIZE.uuid -> { ConnectionParameter.mtu(
                     decodeMTU(data[0]))
+                }
+                CharacteristicUUIDs.NOTIFICATIONS.uuid ->{
+                    bytesReceived += data.size
+                    ConnectionParameter.unknown()
+                }
+                CharacteristicUUIDs.TRANSMISSION.uuid -> {
+                    // If the data is = 0x00, set the timestamp end, if = 0x01 set the timestamp start
+                    if (data[0] == 0x00.toByte()) {
+                        timeStampEnd = Date()
+                        // Calculate throughput
+                        val timeDiff = timeStampEnd!!.time - timeStampStart!!.time
+                        throughput = 8*bytesReceived.toDouble() / timeDiff.toDouble()
+                        Log.d(TAG, "Throughput: $throughput")
+                    } else if (data[0] == 0x01.toByte()) {
+                        bytesReceived = 0
+                        timeStampStart = Date()
+                    }
+                    ConnectionParameter.unknown()
                 }
                 else -> {
                     ConnectionParameter.unknown()
@@ -335,7 +359,7 @@ class BGM220P(
             }
             return result
         }
-    }
+
 
     @Synchronized
     private fun enqueueOperation(operation: GattOperation) {
