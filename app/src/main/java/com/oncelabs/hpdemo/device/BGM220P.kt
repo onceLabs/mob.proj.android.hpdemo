@@ -1,6 +1,7 @@
 package com.oncelabs.hpdemo.device
 
 import android.annotation.SuppressLint
+import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
@@ -89,6 +90,8 @@ class BGM220P(
                 Log.i("BluetoothGattCallback", "Service discovery status: $status")
                 signalEndOfOperation()
             }
+            // Request 2MPHY
+            gatt?.setPreferredPhy(BluetoothDevice.PHY_LE_2M_MASK, BluetoothDevice.PHY_LE_2M_MASK, BluetoothDevice.PHY_OPTION_NO_PREFERRED)
         }
 
 
@@ -97,13 +100,28 @@ class BGM220P(
             characteristic: BluetoothGattCharacteristic,
             value: ByteArray
         ) {
-//            val newValueHex = value.toHexString()
-//            Log.i(
-//                "BluetoothGattCallback",
-//                "Characteristic ${characteristic.uuid} changed | value: $newValueHex"
-//            )
+            val newValueHex = value.toHexString()
+            Log.d(
+                "BluetoothGattCallback",
+                "Characteristic ${characteristic.uuid} changed | value: $newValueHex"
+            )
             // Attempt to decode
             val cp = decode(value, characteristic.uuid)
+        }
+
+        @Deprecated("Deprecated in Java")
+        override fun onCharacteristicChanged(
+            gatt: BluetoothGatt?,
+            characteristic: BluetoothGattCharacteristic?
+        ) {
+            super.onCharacteristicChanged(gatt, characteristic)
+            Log.d(
+                "BluetoothGattCallback",
+                "Characteristic ${characteristic?.uuid} changed")
+            val value = characteristic?.value
+            value?.let {
+                val cp = decode(it, characteristic.uuid)
+            }
         }
 
         override fun onCharacteristicWrite(
@@ -136,6 +154,23 @@ class BGM220P(
                     "BluetoothGattCallback",
                     "Characteristic ${characteristic.uuid} read status: $status")
                 signalEndOfOperation()
+            }
+        }
+
+        override fun onCharacteristicRead(
+            gatt: BluetoothGatt?,
+            characteristic: BluetoothGattCharacteristic?,
+            status: Int
+        ) {
+            super.onCharacteristicRead(gatt, characteristic, status)
+            if (pendingGattOperation != null && pendingGattOperation?.type == GattOperationType.READ) {
+                Log.d(
+                    "BluetoothGattCallback",
+                    "Characteristic ${characteristic?.uuid} read status: $status")
+                signalEndOfOperation()
+            }
+            characteristic?.value?.let {
+                val cp = decode(it, characteristic.uuid)
             }
         }
 
