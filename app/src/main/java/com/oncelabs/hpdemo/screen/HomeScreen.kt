@@ -1,5 +1,7 @@
 package com.oncelabs.hpdemo.screen
 
+import android.widget.Spinner
+import android.widget.SpinnerAdapter
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,6 +23,7 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -32,12 +35,27 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Devices
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.core.widget.ContentLoadingProgressBar
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.oncelabs.hpdemo.device.BGM220P
 import com.oncelabs.hpdemo.enums.TXMethod
 import com.oncelabs.hpdemo.ui.theme.buttonColor
 import com.oncelabs.hpdemo.ui.theme.gray
 import com.oncelabs.hpdemo.viewModel.HomeViewModel
 
+
+data class ThroughputInformation(
+    val elapsedTime: Int?,
+    val bytesReceived: Int?,
+    val throughput: Int?,
+    val phy: BGM220P.PHY?,
+    val connectionInterval: Int?,
+    val latency: Int?,
+    val supervisionTimeout: Int?,
+    val pduSize: Int?,
+    val mtuSize: Int?,
+    val testActive: Boolean?
+)
 /**
  * Home Screen of the application
  * - [State hoisting](https://developer.android.com/jetpack/compose/state#state-hoisting)
@@ -50,17 +68,34 @@ fun HomeScreen(
     val isScanning: MutableState<Boolean> = remember {
         mutableStateOf(false)
     }
-    val txMethod: MutableState<TXMethod> = remember {
-        mutableStateOf(TXMethod.NOTIFICATIONS)
-    }
+    val elapsedTime = homeViewModel.elapsedTime.observeAsState()
+    val bytesReceived = homeViewModel.bytesReceived.observeAsState()
+    val throughput = homeViewModel.throughput.observeAsState()
+    val phy = homeViewModel.phy.observeAsState()
+    val connectionInterval = homeViewModel.connectionInterval.observeAsState()
+    val latency = homeViewModel.latency.observeAsState()
+    val supervisionTimeout = homeViewModel.superVisionTimeout.observeAsState()
+    val pduSize = homeViewModel.pduSize.observeAsState()
+    val mtuSize = homeViewModel.mtuSize.observeAsState()
+    val testActive = homeViewModel.testInProgress.observeAsState()
 
     HomeContent(
         isScanning.value,
         { homeViewModel.stopScan() },
         { homeViewModel.startScan() },
         { isScanning.value = it },
-        txMethod.value,
-        { txMethod.value = it }
+        ThroughputInformation(
+            elapsedTime.value,
+            bytesReceived.value,
+            throughput.value,
+            phy.value,
+            connectionInterval.value,
+            latency.value,
+            supervisionTimeout.value,
+            pduSize.value,
+            mtuSize.value,
+            testActive.value
+        )
     )
 }
 
@@ -70,17 +105,21 @@ private fun HomeContent(
     stopScan: () -> Unit,
     startScan: () -> Unit,
     setIsScanning: (Boolean) -> Unit,
-    txMethod: TXMethod,
-    changeTXMethod: (TXMethod) -> Unit
+    throughputInformation: ThroughputInformation
 ) {
     Column(
         Modifier
+            .background(gray)
             .fillMaxSize()
             .padding(start = 50.dp, end = 50.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        CircularProgressIndicator(color = gray)
+        throughputInformation.testActive?.let {
+            if (it){
+
+            }
+        }
         Spacer(Modifier.height(25.dp))
         Button(
             onClick = {
@@ -97,91 +136,68 @@ private fun HomeContent(
                 contentColor = Color.White
             )
         ) {
-            Text(if (isScanning) "Stop Scan" else "Start Scan", Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+            Text(if (isScanning) "Disconnect" else "Connect", Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
         }
-        Spacer(Modifier.height(5.dp))
-        Button(
-            onClick = {
-            },
-            shape = RoundedCornerShape(5.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = buttonColor,
-                contentColor = Color.White
-            )
-        ) {
-            Text("Begin Test", Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
-        }
-        Spacer(Modifier.height(25.dp))
-        TabRow(
-            selectedTabIndex = if (TXMethod.NOTIFICATIONS == txMethod) 0 else 1,
-            containerColor = gray,
-            modifier = Modifier
-                .clip(RoundedCornerShape(10.dp))
-                .height(40.dp),
-            indicator = { tabPositions: List<TabPosition> ->
-                Box {}
-            }
-        ) {
-            TXMethod.entries.forEach {
-                val selected = txMethod == it
-                Tab(
-                    modifier = if (selected) Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(
-                            buttonColor
-                        )
-                    else Modifier
-                        .padding(4.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(
-                            gray
-                        ),
-                    selected = selected,
-                    onClick = { changeTXMethod(it) },
-                    text = { Text(text = it.title, color = if (selected) Color.White else Color.Black) }
-                )
-            }
-        }
-        Spacer(Modifier.height(5.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-            Text("Transmit Method: ${txMethod.title}")
-        }
+
         Spacer(Modifier.height(25.dp))
         Column(Modifier.fillMaxWidth()) {
             Row(Modifier.fillMaxWidth()) {
                 Text("Connection Interval:")
                 Spacer(Modifier.weight(1f))
-                Text("30ms")
+                Text("${throughputInformation.connectionInterval}ms")
             }
             Row(Modifier.fillMaxWidth()) {
                 Text("PHY:")
                 Spacer(Modifier.weight(1f))
-                Text("2M")
+                Text("${throughputInformation.phy}")
             }
             Row(Modifier.fillMaxWidth()) {
                 Text("MTU:")
                 Spacer(Modifier.weight(1f))
-                Text("247")
+                Text("${throughputInformation.mtuSize}")
             }
         }
         Spacer(Modifier.height(25.dp))
         Column(Modifier.fillMaxWidth()) {
             Row(Modifier.fillMaxWidth()) {
-                Text("Bytes Sent:")
+                Text("Bytes Received:")
                 Spacer(Modifier.weight(1f))
-                Text("12,394")
+                Text("${throughputInformation.bytesReceived}")
             }
             Row(Modifier.fillMaxWidth()) {
                 Text("Elapsed Time:")
                 Spacer(Modifier.weight(1f))
-                Text("12.34 Seconds")
+                Text("${throughputInformation.elapsedTime} Seconds")
             }
             Row(Modifier.fillMaxWidth()) {
                 Text("Avg Throughput:")
                 Spacer(Modifier.weight(1f))
-                Text("328kbps")
+                Text("${throughputInformation.throughput}kbps")
             }
         }
     }
 }
 
+// Add preview for the HomeScreen
+@Preview(device = Devices.PIXEL_4_XL)
+@Composable
+fun HomeScreenPreview() {
+    HomeContent(
+        isScanning = false,
+        stopScan = {},
+        startScan = {},
+        setIsScanning = {},
+        ThroughputInformation(
+            0,
+            0,
+            0,
+            BGM220P.PHY.PHY_1M,
+            0,
+            0,
+            0,
+            0,
+            0,
+            true
+        )
+    )
+}

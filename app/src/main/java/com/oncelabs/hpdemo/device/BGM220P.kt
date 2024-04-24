@@ -14,8 +14,12 @@ import android.os.Build
 import android.util.Log
 import com.oncelabs.hpdemo.device.gatt.BGM220PGatt
 import com.oncelabs.hpdemo.device.gatt.CharacteristicUUIDs
+import com.oncelabs.hpdemo.enums.ScanState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.util.Date
 import java.util.Queue
 import java.util.UUID
@@ -56,8 +60,30 @@ class BGM220P(
     private var pendingGattOperation: GattOperation? = null
     private var timeStampStart: Date? = null
     private var timeStampEnd: Date? = null
-    private var bytesReceived: Int = 0
-    private var throughput: Double = 0.0
+    //private var bytesReceived: Int = 0
+    //private var throughput: Double = 0.0
+
+    private val _elapsedTime: MutableStateFlow<Int> = MutableStateFlow(0)
+    private val _bytesReceived: MutableStateFlow<Int> = MutableStateFlow(0)
+    private val _throughput: MutableStateFlow<Int> = MutableStateFlow(0)
+    private val _phy = MutableStateFlow(PHY.UNKNOWN)
+    private val _connectionInterval: MutableStateFlow<Int>  = MutableStateFlow(0)
+    private val _latency: MutableStateFlow<Int>  = MutableStateFlow(0)
+    private val _supervisionTimeout: MutableStateFlow<Int>  = MutableStateFlow(0)
+    private val _pduSize: MutableStateFlow<Int>  = MutableStateFlow(0)
+    private val _mtuSize: MutableStateFlow<Int>  = MutableStateFlow(0)
+    private val _testActive: MutableStateFlow<Boolean> = MutableStateFlow(false)
+
+    val elapsedTime: StateFlow<Int> = _elapsedTime.asStateFlow()
+    val bytesReceived: StateFlow<Int> = _bytesReceived.asStateFlow()
+    val throughput: StateFlow<Int> = _throughput.asStateFlow()
+    val phy: StateFlow<PHY> = _phy.asStateFlow()
+    val connectionInterval: StateFlow<Int> = _connectionInterval.asStateFlow()
+    val latency: StateFlow<Int> = _latency.asStateFlow()
+    val supervisionTimeout: StateFlow<Int> = _supervisionTimeout.asStateFlow()
+    val pduSize: StateFlow<Int> = _pduSize.asStateFlow()
+    val mtuSize: StateFlow<Int> = _mtuSize.asStateFlow()
+    val testActive: StateFlow<Boolean> = _testActive.asStateFlow()
 
     @OptIn(ExperimentalStdlibApi::class)
     private val gattCallback = object : BluetoothGattCallback() {
@@ -334,7 +360,11 @@ class BGM220P(
                     decodeMTU(data[0]))
                 }
                 CharacteristicUUIDs.NOTIFICATIONS.uuid ->{
-                    bytesReceived += data.size
+                    _bytesReceived.value += data.size
+                    timeStampStart?.let {
+                        val timeDiff = Date().time - it.time
+                        _elapsedTime.value = timeDiff.toInt()
+                    }
                     ConnectionParameter.unknown()
                 }
                 CharacteristicUUIDs.TRANSMISSION.uuid -> {
@@ -343,11 +373,13 @@ class BGM220P(
                         timeStampEnd = Date()
                         // Calculate throughput
                         val timeDiff = timeStampEnd!!.time - timeStampStart!!.time
-                        throughput = 8*bytesReceived.toDouble() / timeDiff.toDouble()
+                        _throughput.value = (8*_bytesReceived.value.toDouble() / timeDiff.toDouble()).toInt()
                         Log.d(TAG, "Throughput: $throughput")
+                        _testActive.value = false
                     } else if (data[0] == 0x01.toByte()) {
-                        bytesReceived = 0
+                        _bytesReceived.value = 0
                         timeStampStart = Date()
+                        _testActive.value = true
                     }
                     ConnectionParameter.unknown()
                 }

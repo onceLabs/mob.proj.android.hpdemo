@@ -35,6 +35,9 @@ import javax.inject.Singleton
 class DeviceManagerImpl @Inject constructor(
 ) : DeviceManager {
 
+    private val _selectedDevice = MutableStateFlow<BGM220P?>(null)
+    override val selectedDevice: StateFlow<BGM220P?> = _selectedDevice.asStateFlow()
+
     private val leDeviceMap: ConcurrentMap<String, BGM220P> = ConcurrentHashMap()
 
     private var bleStateFlow = MutableSharedFlow<BleState?>()
