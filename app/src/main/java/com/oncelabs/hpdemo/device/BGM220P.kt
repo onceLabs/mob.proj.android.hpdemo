@@ -11,6 +11,8 @@ import android.bluetooth.le.ScanResult
 import android.content.BroadcastReceiver
 import android.content.ContentValues.TAG
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.util.Log
 import com.oncelabs.hpdemo.device.gatt.BGM220PGatt
@@ -52,9 +54,10 @@ class GattOperation(
 @SuppressLint("MissingPermission")
 class BGM220P(
     scanResult: ScanResult,
-    context: Context,
+    private val context: Context,
     connectionStateReceiver: (connectionState: Int, device: BGM220P) -> Unit
 ) {
+    private var bondStateRegistered = false
     private var gattOperationScope = CoroutineScope(Dispatchers.IO)
     private val bgmGatt: BGM220PGatt = BGM220PGatt()
     private var bluetoothGatt: BluetoothGatt? = null
@@ -89,6 +92,19 @@ class BGM220P(
     val pduSize: StateFlow<Int> = _pduSize.asStateFlow()
     val mtuSize: StateFlow<Int> = _mtuSize.asStateFlow()
     val testActive: StateFlow<Boolean> = _testActive.asStateFlow()
+
+    private var bondState: Int? = null
+        set(value){
+            value?.let { newBondState ->
+                if (bondState == BluetoothDevice.BOND_BONDING && newBondState == BluetoothDevice.BOND_NONE){
+                    //bonding failed
+                }
+                else if (bondState == BluetoothDevice.BOND_BONDING && newBondState == BluetoothDevice.BOND_BONDED){
+                    //bonding successful
+                }
+            }
+            field = value
+        }
 
     @OptIn(ExperimentalStdlibApi::class)
     private val gattCallback = object : BluetoothGattCallback() {
@@ -270,6 +286,49 @@ class BGM220P(
         enqueueOperation(GattOperation(GattOperationType.READ) {
             return@GattOperation bluetoothGatt?.readCharacteristic(bgmGatt.connectionIntervalCharacteristic) ?: false
         })
+    }
+
+    private fun setupBondStateHandler() {
+        if (bondStateRegistered)
+            return
+        val filter = IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+        filter.addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
+        context.registerReceiver(bluetoothBondStateReceiver, filter)
+        bondStateRegistered = true
+    }
+
+    private val bluetoothBondStateReceiver: BroadcastReceiver = object : BroadcastReceiver() {
+        @SuppressLint("MissingPermission")
+        override fun onReceive(context: Context, intent: Intent) {
+
+            val action = intent.action
+            if(action == BluetoothDevice.ACTION_ACL_CONNECTED) {
+                val mDevice = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+                mDevice?.bondState?.let { _bondState ->
+                    this@BGM220P.bondState = _bondState
+                }
+            }
+            else if (action == BluetoothDevice.ACTION_BOND_STATE_CHANGED) {
+                val mDevice = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+                mDevice?.bondState?.let { bondState ->
+                    this@BGM220P.bondState = bondState
+                    when (bondState) {
+                        BluetoothDevice.BOND_BONDED -> {
+                            Log.d(TAG, "Bond State is Bonded")
+                        }
+                        BluetoothDevice.BOND_BONDING -> {
+                            Log.d(TAG, "Bond State is Bonding")
+                        }
+                        BluetoothDevice.BOND_NONE -> {
+                            Log.d(TAG, "Bond State is None")
+                        }
+                        else -> {
+                            Log.d(TAG, "Bond State is ? $bondState")
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private fun enableNotifications(characteristic: BluetoothGattCharacteristic) {
