@@ -3,6 +3,7 @@ package com.oncelabs.hpdemo.manager.implementation
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanFilter
@@ -156,6 +157,24 @@ class DeviceManagerImpl @Inject constructor(
         }
     }
 
+    private fun connectionStateReceiver(connectionState: Int, device: BGM220P){
+        when (connectionState) {
+            BluetoothProfile.STATE_CONNECTED -> {
+                _selectedDevice.value = device
+                Log.d(TAG, "BluetoothProfile State: Connected")
+            }
+            BluetoothProfile.STATE_CONNECTING -> {
+                Log.d(TAG, "BluetoothProfile State: Connecting")
+            }
+            BluetoothProfile.STATE_DISCONNECTED -> {
+                Log.d(TAG, "BluetoothProfile State: Disconnected")
+            }
+            BluetoothProfile.STATE_DISCONNECTING -> {
+                Log.d(TAG, "BluetoothProfile State: Disconnecting")
+            }
+        }
+    }
+
     private val leScanCallback: ScanCallback by lazy {
         object : ScanCallback() {
             @SuppressLint("MissingPermission")
@@ -166,7 +185,7 @@ class DeviceManagerImpl @Inject constructor(
                         // Check for existing entry
                         if (!leDeviceMap.containsKey(deviceAddress)) {
                             if (result.device?.name == "Throughput Test") {
-                                val device = BGM220P(result, context)
+                                val device = BGM220P(result, context, connectionStateReceiver = ::connectionStateReceiver)
                                 leDeviceMap[deviceAddress] = device
                             } else {
                                 //Log.d("TEST", "DEVICE FOUND ${result.device.address}")
