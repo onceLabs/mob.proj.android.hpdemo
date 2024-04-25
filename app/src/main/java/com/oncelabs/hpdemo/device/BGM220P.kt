@@ -122,7 +122,7 @@ class BGM220P(
                 Log.i("BluetoothGattCallback", "Service discovery status: $status")
                 signalEndOfOperation()
             }
-            // Request 2MPHY
+            // Request 2MPHY, only for demo purposes
             gatt?.setPreferredPhy(BluetoothDevice.PHY_LE_2M_MASK, BluetoothDevice.PHY_LE_2M_MASK, BluetoothDevice.PHY_OPTION_NO_PREFERRED)
         }
 
